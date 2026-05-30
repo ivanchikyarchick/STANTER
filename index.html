@@ -1,13 +1,19 @@
 <!DOCTYPE html>
-<html lang="uk">
-<head>
+<html lang="uk" class="dark"> <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>STANTER</title>
     <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Налаштування Tailwind для підтримки темної теми через клас
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: {} }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;700&display=swap" rel="stylesheet">
-    <meta name="theme-color" content="#f4f4f5">
+    <meta name="theme-color" content="#18181b">
     <style>
         body { font-family: 'Roboto Mono', monospace; user-select: none; touch-action: manipulation; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -15,12 +21,17 @@
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
     </style>
 </head>
-<body class="bg-zinc-100 text-zinc-900 overflow-hidden h-screen flex flex-col">
+<body class="bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden h-screen flex flex-col transition-colors duration-300">
 
     <div id="tab-tracker" class="flex-1 flex flex-col p-6 gap-6">
-        <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.4em] text-zinc-400">
-            <span>STANTER</span>
-            <span id="status-label">не калібровано</span>
+        <div class="flex justify-between items-center">
+            <span class="text-[10px] uppercase tracking-[0.4em] text-zinc-400">STANTER</span>
+            
+            <div class="flex items-center gap-3">
+                <span id="gps-status" class="text-[9px] uppercase tracking-widest text-zinc-400">GPS ВИМК</span>
+                <span id="status-label" class="text-[9px] uppercase tracking-widest text-zinc-400">не калібровано</span>
+                <button id="theme-toggle" class="p-2 bg-zinc-200 dark:bg-zinc-800 rounded-full text-xs">🌓</button>
+            </div>
         </div>
 
         <div id="display-idle" class="flex-1 flex flex-col items-center justify-center text-center gap-4">
@@ -45,7 +56,7 @@
         </div>
 
         <div id="display-active" class="hidden flex-1 flex flex-col items-center justify-center text-center gap-6">
-            <div class="text-5xl font-light tracking-[0.3em] recording-pulse">СТАНТ</div>
+            <div class="text-5xl font-light tracking-[0.3em] recording-pulse text-red-500">СТАНТ</div>
             <div class="flex gap-12">
                 <div>
                     <p class="text-[10px] text-zinc-400 uppercase tracking-widest">час</p>
@@ -59,16 +70,16 @@
         </div>
 
         <div class="space-y-4">
-            <button id="btn-toggle-rec" class="w-full flex items-center justify-between border-t border-zinc-200 pt-4 opacity-30" disabled>
+            <button id="btn-toggle-rec" class="w-full flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 pt-4 opacity-30" disabled>
                 <span class="text-xs uppercase tracking-[0.3em]">Запис станту</span>
-                <div id="toggle-bg" class="h-6 w-11 rounded-full bg-zinc-300 transition-colors relative">
+                <div id="toggle-bg" class="h-6 w-11 rounded-full bg-zinc-300 dark:bg-zinc-700 transition-colors relative">
                     <div id="toggle-dot" class="absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition-all"></div>
                 </div>
             </button>
 
             <div class="flex gap-3 text-[10px] uppercase tracking-[0.3em]">
-                <button id="btn-calib" class="flex-1 bg-zinc-900 text-white py-3">калібрувати</button>
-                <button id="btn-reset" class="hidden border border-zinc-300 px-4 py-3 text-zinc-500">скинути</button>
+                <button id="btn-calib" class="flex-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold py-3 rounded-md">калібрувати</button>
+                <button id="btn-reset" class="hidden border border-zinc-300 dark:border-zinc-700 px-4 py-3 text-zinc-500 rounded-md">скинути</button>
             </div>
         </div>
     </div>
@@ -79,8 +90,8 @@
             <span id="archive-count">0 записів</span>
         </div>
         
-        <div id="best-record" class="hidden border border-zinc-300 p-4 flex justify-between items-center">
-            <span class="text-[10px] uppercase text-zinc-400">рекорд</span>
+        <div id="best-record" class="hidden border border-zinc-300 dark:border-zinc-700 p-4 flex justify-between items-center rounded-md">
+            <span class="text-[10px] uppercase text-zinc-400">рекорд дистанції</span>
             <span class="text-2xl font-light"><span id="best-dist">0</span> м</span>
         </div>
 
@@ -88,16 +99,33 @@
             </div>
     </div>
 
-    <nav class="h-16 border-t border-zinc-200 flex items-center justify-around bg-zinc-50">
-        <button id="nav-tracker" class="flex flex-col items-center gap-1 text-zinc-900">
+    <nav class="h-16 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-around bg-zinc-50 dark:bg-zinc-900">
+        <button id="nav-tracker" class="flex flex-col items-center gap-1 text-zinc-900 dark:text-zinc-100">
             <span class="text-[10px] uppercase tracking-widest font-bold">Трекер</span>
         </button>
-        <button id="nav-archive" class="flex flex-col items-center gap-1 text-zinc-400">
+        <button id="nav-archive" class="flex flex-col items-center gap-1 text-zinc-400 dark:text-zinc-500">
             <span class="text-[10px] uppercase tracking-widest">Архів</span>
         </button>
     </nav>
 
     <script>
+        // ТЕМНА ТЕМА
+        const themeToggle = document.getElementById('theme-toggle');
+        const htmlElement = document.documentElement;
+        
+        // Перевіряємо збережену тему
+        if (localStorage.getItem('theme') === 'light') {
+            htmlElement.classList.remove('dark');
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f4f4f5');
+        }
+
+        themeToggle.addEventListener('click', () => {
+            htmlElement.classList.toggle('dark');
+            const isDark = htmlElement.classList.contains('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', isDark ? '#18181b' : '#f4f4f5');
+        });
+
         // DB Setup
         const db = new Dexie("StanterDB");
         db.version(6).stores({ sessions: '++id, date, duration, distance, avgSpeed', settings: 'key' });
@@ -107,7 +135,7 @@
         let isStunting = false;
         let recordingEnabled = false;
         
-        let calibBeta = 0; // Основний кут нахилу (вперед/назад)
+        let calibBeta = 0;
         let currentBeta = 0;
         let calibSamples = [];
         let isCalibrating = false;
@@ -120,13 +148,13 @@
         let watchId = null;
         let lastLat = null;
         let lastLon = null;
-        let avgSpeedKmh = 0;
         let speedSamples = [];
 
         // Elements
         const el = (id) => document.getElementById(id);
         const ui = {
             status: el('status-label'),
+            gpsStatus: el('gps-status'),
             idleMsg: el('idle-msg'),
             displayIdle: el('display-idle'),
             displayActive: el('display-active'),
@@ -167,16 +195,19 @@
         ui.btnCalib.onclick = async () => {
             if (isCalibrating) return;
 
-            // Запит дозволу на сенсори (для iOS)
             try {
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    await DeviceOrientationEvent.requestPermission();
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState !== 'granted') {
+                        alert('Потрібен дозвіл на доступ до гіроскопа!');
+                        return;
+                    }
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { console.warn(e); }
 
             isCalibrating = true;
             calibSamples = [];
-            let count = 5; // Зменшив до 5 секунд для зручності
+            let count = 5;
             ui.btnCalib.innerText = `зачекайте ${count}`;
             ui.btnCalib.disabled = true;
             
@@ -196,7 +227,7 @@
             ui.btnCalib.innerText = 'калібрувати';
 
             if (calibSamples.length === 0) {
-                alert("Немає даних від гіроскопа. Переконайся, що дав дозвіл.");
+                alert("Немає даних від сенсора. Порухай телефоном і спробуй ще раз.");
                 return;
             }
 
@@ -219,64 +250,87 @@
             ui.btnReset.classList.toggle('hidden', !calibrated);
             ui.btnRec.disabled = !calibrated;
             ui.btnRec.style.opacity = calibrated ? '1' : '0.3';
-            ui.status.innerText = calibrated ? 'готово' : 'не калібровано';
+            ui.status.innerText = calibrated ? 'ГОТОВО' : 'НЕ КАЛІБРОВАНО';
             ui.idleMsg.innerText = calibrated ? (recordingEnabled ? 'gps працює. чекаю стант' : 'увімкни запис') : 'чекаю калібрування';
         }
 
-        // Обчислення відстані по координатах (Формула Гаверсина)
+        // Гаверсин для дистанції
         function calcDist(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; // радіус Землі в метрах
+            const R = 6371e3;
             const f1 = lat1 * Math.PI/180;
             const f2 = lat2 * Math.PI/180;
             const df = (lat2-lat1) * Math.PI/180;
             const dl = (lon2-lon1) * Math.PI/180;
             const a = Math.sin(df/2) * Math.sin(df/2) +
-                      Math.cos(f1) * Math.cos(f2) *
-                      Math.sin(dl/2) * Math.sin(dl/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c; 
+                      Math.cos(f1) * Math.cos(f2) * Math.sin(dl/2) * Math.sin(dl/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
         }
 
-        // Recording Toggle
+        // Recording & GPS Toggle
         ui.btnRec.onclick = () => {
             recordingEnabled = !recordingEnabled;
-            ui.toggleBg.classList.toggle('bg-zinc-900', recordingEnabled);
+            ui.toggleBg.classList.toggle('bg-green-500', recordingEnabled);
             ui.toggleBg.classList.toggle('bg-zinc-300', !recordingEnabled);
+            ui.toggleBg.classList.toggle('dark:bg-zinc-700', !recordingEnabled);
             ui.toggleDot.classList.toggle('left-6', recordingEnabled);
             ui.toggleDot.classList.toggle('left-1', !recordingEnabled);
             
             if (recordingEnabled) {
-                // Вмикаємо GPS трекінг
+                ui.gpsStatus.innerText = "ПОШУК GPS...";
+                ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-amber-500";
+                
+                if (!navigator.geolocation) {
+                    ui.gpsStatus.innerText = "GPS НЕ ПІДТРИМУЄТЬСЯ";
+                    ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-red-500";
+                    return;
+                }
+
+                // Вмикаємо GPS
                 watchId = navigator.geolocation.watchPosition(
                     (pos) => {
                         const { latitude, longitude, speed } = pos.coords;
+                        const spdKmh = speed ? (speed * 3.6).toFixed(1) : "0.0";
+                        
+                        ui.gpsStatus.innerText = `GPS: ${spdKmh} КМ/Г`;
+                        ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-green-500 font-bold";
                         
                         if (isStunting) {
                             if (lastLat !== null) {
-                                distance += calcDist(lastLat, lastLon, latitude, longitude);
-                                ui.liveDist.innerText = distance.toFixed(1);
+                                const moved = calcDist(lastLat, lastLon, latitude, longitude);
+                                // Фільтруємо мікро-стрибки GPS (менше 0.2м)
+                                if (moved > 0.2) {
+                                    distance += moved;
+                                    ui.liveDist.innerText = distance.toFixed(1);
+                                }
                             }
-                            if (speed !== null) {
-                                speedSamples.push(speed * 3.6);
-                            }
+                            if (speed !== null) speedSamples.push(speed * 3.6);
                         }
                         
                         lastLat = latitude;
                         lastLon = longitude;
                     },
-                    (err) => console.warn(err),
-                    { enableHighAccuracy: true, maximumAge: 0 }
+                    (err) => {
+                        ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-red-500 font-bold";
+                        if (err.code === 1) ui.gpsStatus.innerText = "НЕМАЄ ДОЗВОЛУ GPS";
+                        else if (err.code === 2) ui.gpsStatus.innerText = "СИГНАЛ ВТРАЧЕНО";
+                        else if (err.code === 3) ui.gpsStatus.innerText = "ТАЙМАУТ GPS";
+                        else ui.gpsStatus.innerText = "ПОМИЛКА GPS";
+                        console.warn('GPS Error:', err);
+                    },
+                    { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 } // Збільшив таймаут для стабільності
                 );
             } else {
                 if (watchId) navigator.geolocation.clearWatch(watchId);
                 if (isStunting) stopStunt();
                 lastLat = null;
                 lastLon = null;
+                ui.gpsStatus.innerText = "GPS ВИМК";
+                ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-zinc-400";
             }
             updateCalibUI();
         };
 
-        // Логіка орієнтації (нахилу)
+        // Логіка орієнтації
         window.addEventListener('deviceorientation', (e) => {
             currentBeta = e.beta || 0;
 
@@ -289,7 +343,6 @@
                 let tiltDiff = Math.abs(currentBeta - calibBeta);
                 if (tiltDiff > 180) tiltDiff = 360 - tiltDiff;
 
-                // 15 градусів для початку, менше 5 для зупинки
                 if (!isStunting && tiltDiff > 15) startStunt();
                 else if (isStunting && tiltDiff < 5) stopStunt();
             }
@@ -315,7 +368,6 @@
             
             const dur = (Date.now() - startTime) / 1000;
             
-            // Зберігаємо станти, що тривали більше 1 секунди
             if (dur > 1.0) {
                 let finalSpeed = 0;
                 if (speedSamples.length > 0) {
@@ -353,10 +405,9 @@
         function switchTab(tab) {
             ui.tabTracker.classList.toggle('hidden', tab !== 'tracker');
             ui.tabArchive.classList.toggle('hidden', tab !== 'archive');
-            ui.navTracker.classList.toggle('text-zinc-900', tab === 'tracker');
-            ui.navTracker.classList.toggle('text-zinc-400', tab !== 'tracker');
-            ui.navArchive.classList.toggle('text-zinc-900', tab === 'archive');
-            ui.navArchive.classList.toggle('text-zinc-400', tab !== 'archive');
+            
+            ui.navTracker.className = `flex flex-col items-center gap-1 ${tab === 'tracker' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}`;
+            ui.navArchive.className = `flex flex-col items-center gap-1 ${tab === 'archive' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}`;
         }
 
         async function refreshArchive() {
@@ -370,7 +421,7 @@
             }
 
             ui.list.innerHTML = sessions.map(s => `
-                <div class="bg-zinc-200 p-4">
+                <div class="bg-zinc-200 dark:bg-zinc-800 p-4 rounded-md">
                     <div class="flex justify-between text-[10px] text-zinc-500 mb-2">
                         <span>${s.date.toLocaleDateString()} ${s.date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                     </div>
