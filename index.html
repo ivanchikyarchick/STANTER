@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="uk" class="dark"> <head>
+<html lang="uk" class="dark">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>STANTER</title>
     <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // Налаштування Tailwind для підтримки темної теми через клас
         tailwind.config = {
             darkMode: 'class',
             theme: { extend: {} }
@@ -28,8 +28,11 @@
             <span class="text-[10px] uppercase tracking-[0.4em] text-zinc-400">STANTER</span>
             
             <div class="flex items-center gap-3">
-                <span id="gps-status" class="text-[9px] uppercase tracking-widest text-zinc-400">GPS ВИМК</span>
-                <span id="status-label" class="text-[9px] uppercase tracking-widest text-zinc-400">не калібровано</span>
+                <div class="flex flex-col items-end">
+                    <span id="gps-status" class="text-[9px] uppercase tracking-widest text-zinc-400">GPS ВИМК</span>
+                    <span id="gps-signal" class="text-[8px] uppercase tracking-widest text-zinc-500 hidden"></span>
+                </div>
+                <span id="status-label" class="text-[9px] uppercase tracking-widest text-zinc-400 border-l border-zinc-300 dark:border-zinc-700 pl-3">не калібровано</span>
                 <button id="theme-toggle" class="p-2 bg-zinc-200 dark:bg-zinc-800 rounded-full text-xs">🌓</button>
             </div>
         </div>
@@ -113,7 +116,6 @@
         const themeToggle = document.getElementById('theme-toggle');
         const htmlElement = document.documentElement;
         
-        // Перевіряємо збережену тему
         if (localStorage.getItem('theme') === 'light') {
             htmlElement.classList.remove('dark');
             document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f4f4f5');
@@ -155,6 +157,7 @@
         const ui = {
             status: el('status-label'),
             gpsStatus: el('gps-status'),
+            gpsSignal: el('gps-signal'),
             idleMsg: el('idle-msg'),
             displayIdle: el('display-idle'),
             displayActive: el('display-active'),
@@ -278,6 +281,7 @@
             if (recordingEnabled) {
                 ui.gpsStatus.innerText = "ПОШУК GPS...";
                 ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-amber-500";
+                ui.gpsSignal.classList.add('hidden');
                 
                 if (!navigator.geolocation) {
                     ui.gpsStatus.innerText = "GPS НЕ ПІДТРИМУЄТЬСЯ";
@@ -288,22 +292,40 @@
                 // Вмикаємо GPS
                 watchId = navigator.geolocation.watchPosition(
                     (pos) => {
-                        const { latitude, longitude, speed } = pos.coords;
+                        const { latitude, longitude, speed, accuracy } = pos.coords;
                         const spdKmh = speed ? (speed * 3.6).toFixed(1) : "0.0";
                         
-                        ui.gpsStatus.innerText = `GPS: ${spdKmh} КМ/Г`;
-                        ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-green-500 font-bold";
+                        // Логіка сигналу GPS на основі точності
+                        let signalText = "СИГНАЛ: СЛАБКИЙ";
+                        let signalColor = "text-red-500";
+                        
+                        if (accuracy <= 10) {
+                            signalText = "СИГНАЛ: ІДЕАЛЬНИЙ";
+                            signalColor = "text-green-500";
+                        } else if (accuracy <= 25) {
+                            signalText = "СИГНАЛ: НОРМ";
+                            signalColor = "text-amber-500";
+                        }
+
+                        ui.gpsStatus.innerText = `ШВИДКІСТЬ: ${spdKmh} КМ/Г`;
+                        ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-zinc-900 dark:text-zinc-100 font-bold";
+                        
+                        ui.gpsSignal.innerText = signalText;
+                        ui.gpsSignal.className = `text-[8px] uppercase tracking-widest ${signalColor}`;
+                        ui.gpsSignal.classList.remove('hidden');
                         
                         if (isStunting) {
                             if (lastLat !== null) {
                                 const moved = calcDist(lastLat, lastLon, latitude, longitude);
-                                // Фільтруємо мікро-стрибки GPS (менше 0.2м)
-                                if (moved > 0.2) {
+                                // Фільтруємо мікро-стрибки GPS і поганий сигнал
+                                if (moved > 0.2 && accuracy <= 25) {
                                     distance += moved;
                                     ui.liveDist.innerText = distance.toFixed(1);
                                 }
                             }
-                            if (speed !== null) speedSamples.push(speed * 3.6);
+                            if (speed !== null && accuracy <= 25) {
+                                speedSamples.push(speed * 3.6);
+                            }
                         }
                         
                         lastLat = latitude;
@@ -311,13 +333,13 @@
                     },
                     (err) => {
                         ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-red-500 font-bold";
+                        ui.gpsSignal.classList.add('hidden');
                         if (err.code === 1) ui.gpsStatus.innerText = "НЕМАЄ ДОЗВОЛУ GPS";
                         else if (err.code === 2) ui.gpsStatus.innerText = "СИГНАЛ ВТРАЧЕНО";
                         else if (err.code === 3) ui.gpsStatus.innerText = "ТАЙМАУТ GPS";
                         else ui.gpsStatus.innerText = "ПОМИЛКА GPS";
-                        console.warn('GPS Error:', err);
                     },
-                    { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 } // Збільшив таймаут для стабільності
+                    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
                 );
             } else {
                 if (watchId) navigator.geolocation.clearWatch(watchId);
@@ -326,6 +348,7 @@
                 lastLon = null;
                 ui.gpsStatus.innerText = "GPS ВИМК";
                 ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-zinc-400";
+                ui.gpsSignal.classList.add('hidden');
             }
             updateCalibUI();
         };
