@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>STANTER</title>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#f4f4f5">
+    <style>
+        body { font-family: 'Roboto Mono', monospace; user-select: none; touch-action: manipulation; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .recording-pulse { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+    </style>
+</head>
+<body class="bg-zinc-100 text-zinc-900 overflow-hidden h-screen flex flex-col">
+
+    <!-- ТАБ: ТРЕКЕР -->
+    <div id="tab-tracker" class="flex-1 flex flex-col p-6 gap-6">
+        <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.4em] text-zinc-400">
+            <span>STANTER</span>
+            <span id="status-label">не калібровано</span>
+        </div>
+
+        <div id="display-idle" class="flex-1 flex flex-col items-center justify-center text-center gap-4">
+            <div id="last-stunt-box" class="hidden w-full space-y-6">
+                <p class="text-[10px] uppercase tracking-[0.4em] text-zinc-400">останній стант</p>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <p class="text-[9px] text-zinc-400 uppercase">км/г</p>
+                        <p id="res-speed" class="text-2xl font-light">0.0</p>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-zinc-400 uppercase">метрів</p>
+                        <p id="res-dist" class="text-2xl font-light">0.0</p>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-zinc-400 uppercase">секунд</p>
+                        <p id="res-time" class="text-2xl font-light">0.0</p>
+                    </div>
+                </div>
+            </div>
+            <p id="idle-msg" class="text-sm uppercase tracking-[0.2em] text-zinc-400 px-8">чекаю калібрування</p>
+        </div>
+
+        <div id="display-active" class="hidden flex-1 flex flex-col items-center justify-center text-center gap-6">
+            <div class="text-5xl font-light tracking-[0.3em] recording-pulse">СТАНТ</div>
+            <div class="flex gap-12">
+                <div>
+                    <p class="text-[10px] text-zinc-400 uppercase tracking-widest">час</p>
+                    <p id="live-time" class="text-5xl font-light">0.0</p>
+                </div>
+                <div>
+                    <p class="text-[10px] text-zinc-400 uppercase tracking-widest">дист</p>
+                    <p id="live-dist" class="text-5xl font-light">0.0</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <button id="btn-toggle-rec" class="w-full flex items-center justify-between border-t border-zinc-200 pt-4 opacity-30" disabled>
+                <span class="text-xs uppercase tracking-[0.3em]">Запис станту</span>
+                <div id="toggle-bg" class="h-6 w-11 rounded-full bg-zinc-300 transition-colors relative">
+                    <div id="toggle-dot" class="absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition-all"></div>
+                </div>
+            </button>
+
+            <div class="flex gap-3 text-[10px] uppercase tracking-[0.3em]">
+                <button id="btn-calib" class="flex-1 bg-zinc-900 text-white py-3">калібрувати</button>
+                <button id="btn-reset" class="hidden border border-zinc-300 px-4 py-3 text-zinc-500">скинути</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ТАБ: АРХІВ -->
+    <div id="tab-archive" class="hidden flex-1 flex flex-col p-6 gap-6 overflow-hidden">
+        <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.4em] text-zinc-400">
+            <span>STANTER</span>
+            <span id="archive-count">0 записів</span>
+        </div>
+        
+        <div id="best-record" class="hidden border border-zinc-300 p-4 flex justify-between items-center">
+            <span class="text-[10px] uppercase text-zinc-400">рекорд</span>
+            <span class="text-2xl font-light"><span id="best-dist">0</span> м</span>
+        </div>
+
+        <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar space-y-2">
+            <!-- записи тут -->
+        </div>
+    </div>
+
+    <!-- НАВІГАЦІЯ -->
+    <nav class="h-16 border-t border-zinc-200 flex items-center justify-around bg-zinc-50">
+        <button id="nav-tracker" class="flex flex-col items-center gap-1 text-zinc-900">
+            <span class="text-[10px] uppercase tracking-widest font-bold">Трекер</span>
+        </button>
+        <button id="nav-archive" class="flex flex-col items-center gap-1 text-zinc-400">
+            <span class="text-[10px] uppercase tracking-widest">Архів</span>
+        </button>
+    </nav>
+
+    <script>
+        // DB Setup
+        const db = new Dexie("StanterDB");
+        db.version(5).stores({ sessions: '++id, date, duration, distance, avgSpeed', settings: 'key' });
+
+        // State
+        let calibrated = false;
+        let isStunting = false;
+        let recordingEnabled = false;
+        let baseVec = null;
+        let gravity = { x: 0, y: 0, z: 0 };
+        let velocity = 0;
+        let distance = 0;
+        let startTime = null;
+        let lastTimestamp = 0;
+        let calibSamples = [];
+        let isCalibrating = false;
+
+        // Elements
+        const el = (id) => document.getElementById(id);
+        const ui = {
+            status: el('status-label'),
+            idleMsg: el('idle-msg'),
+            displayIdle: el('display-idle'),
+            displayActive: el('display-active'),
+            lastStunt: el('last-stunt-box'),
+            liveTime: el('live-time'),
+            liveDist: el('live-dist'),
+            resSpeed: el('res-speed'),
+            resDist: el('res-dist'),
+            resTime: el('res-time'),
+            btnRec: el('btn-toggle-rec'),
+            btnCalib: el('btn-calib'),
+            btnReset: el('btn-reset'),
+            toggleBg: el('toggle-bg'),
+            toggleDot: el('toggle-dot'),
+            list: el('session-list'),
+            bestBox: el('best-record'),
+            bestDist: el('best-dist'),
+            archCount: el('archive-count'),
+            tabTracker: el('tab-tracker'),
+            tabArchive: el('tab-archive'),
+            navTracker: el('nav-tracker'),
+            navArchive: el('nav-archive')
+        };
+
+        // Load Settings
+        async function initApp() {
+            const saved = await db.settings.get('calibration');
+            if (saved) {
+                baseVec = saved.val;
+                calibrated = true;
+                updateCalibUI();
+            }
+            refreshArchive();
+        }
+        initApp();
+
+        // Calibration + Permissions
+        ui.btnCalib.onclick = async () => {
+            if (isCalibrating) return;
+
+            // Request permissions on first click
+            try {
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceOrientationEvent !== 'undefined') {
+                    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                        await DeviceMotionEvent.requestPermission();
+                    }
+                    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        await DeviceOrientationEvent.requestPermission();
+                    }
+                }
+            } catch (e) { console.error(e); }
+
+            isCalibrating = true;
+            calibSamples = [];
+            let count = 10;
+            ui.btnCalib.innerText = `зачекайте ${count}`;
+            ui.btnCalib.disabled = true;
+            
+            const timer = setInterval(() => {
+                count--;
+                ui.btnCalib.innerText = `зачекайте ${count}`;
+                if (count <= 0) {
+                    clearInterval(timer);
+                    finishCalib();
+                }
+            }, 1000);
+        };
+
+        function finishCalib() {
+            isCalibrating = false;
+            ui.btnCalib.disabled = false;
+            ui.btnCalib.innerText = 'калібрувати';
+
+            if (calibSamples.length === 0) {
+                alert("Помилка: Немає даних від сенсорів. Переконайся, що відкрив сайт через HTTPS і надав дозвіл.");
+                return;
+            }
+
+            const sum = calibSamples.reduce((a, b) => ({ x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }), {x:0, y:0, z:0});
+            const avg = { x: sum.x/calibSamples.length, y: sum.y/calibSamples.length, z: sum.z/calibSamples.length };
+            const len = Math.sqrt(avg.x**2 + avg.y**2 + avg.z**2);
+            baseVec = { x: avg.x/len, y: avg.y/len, z: avg.z/len };
+            
+            db.settings.put({ key: 'calibration', val: baseVec });
+            calibrated = true;
+            updateCalibUI();
+        }
+
+        ui.btnReset.onclick = () => {
+            baseVec = null;
+            calibrated = false;
+            db.settings.delete('calibration');
+            updateCalibUI();
+        };
+
+        function updateCalibUI() {
+            ui.btnReset.classList.toggle('hidden', !calibrated);
+            ui.btnRec.disabled = !calibrated;
+            ui.btnRec.style.opacity = calibrated ? '1' : '0.3';
+            ui.status.innerText = calibrated ? 'готово' : 'не калібровано';
+            ui.idleMsg.innerText = calibrated ? (recordingEnabled ? 'чекаю стант' : 'увімкни запис') : 'чекаю калібрування';
+        }
+
+        // Recording Toggle
+        ui.btnRec.onclick = () => {
+            recordingEnabled = !recordingEnabled;
+            ui.toggleBg.classList.toggle('bg-zinc-900', recordingEnabled);
+            ui.toggleBg.classList.toggle('bg-zinc-300', !recordingEnabled);
+            ui.toggleDot.classList.toggle('left-6', recordingEnabled);
+            ui.toggleDot.classList.toggle('left-1', !recordingEnabled);
+            if (!recordingEnabled && isStunting) stopStunt();
+            updateCalibUI();
+        };
+
+        // Motion handling
+        window.addEventListener('devicemotion', (e) => {
+            const accG = e.accelerationIncludingGravity;
+            if (!accG || accG.x === null) return;
+            
+            // Low pass gravity
+            const alpha = 0.2;
+            gravity.x = gravity.x + alpha * (accG.x - gravity.x);
+            gravity.y = gravity.y + alpha * (accG.y - gravity.y);
+            gravity.z = gravity.z + alpha * (accG.z - gravity.z);
+
+            if (isCalibrating) calibSamples.push({ ...gravity });
+
+            if (calibrated && recordingEnabled && !isCalibrating) {
+                // Calculate Tilt Angle from gravity vector
+                const len = Math.sqrt(gravity.x**2 + gravity.y**2 + gravity.z**2);
+                if (len > 0) {
+                    const cur = { x: gravity.x/len, y: gravity.y/len, z: gravity.z/len };
+                    const dot = cur.x*baseVec.x + cur.y*baseVec.y + cur.z*baseVec.z;
+                    const tilt = Math.acos(Math.max(-1, Math.min(1, dot))) * (180/Math.PI);
+
+                    if (!isStunting && tilt > 20) startStunt();
+                    else if (isStunting && tilt < 8) stopStunt();
+                }
+            }
+
+            // Distance integration
+            if (isStunting) {
+                const acc = e.acceleration;
+                const now = performance.now();
+                const dt = (now - lastTimestamp) / 1000;
+                lastTimestamp = now;
+                if (acc && dt > 0 && dt < 0.5) {
+                    const a = acc.y || 0;
+                    velocity += a * dt;
+                    distance += Math.abs(velocity * dt);
+                    ui.liveDist.innerText = distance.toFixed(1);
+                    ui.liveTime.innerText = ((Date.now() - startTime)/1000).toFixed(1);
+                }
+            }
+        });
+
+        function startStunt() {
+            isStunting = true;
+            startTime = Date.now();
+            lastTimestamp = performance.now();
+            velocity = 0;
+            distance = 0;
+            ui.displayIdle.classList.add('hidden');
+            ui.displayActive.classList.remove('hidden');
+        }
+
+        async function stopStunt() {
+            isStunting = false;
+            const dur = (Date.now() - startTime) / 1000;
+            if (dur > 0.5) {
+                const speed = (distance / dur) * 3.6;
+                const res = { date: new Date(), duration: +dur.toFixed(1), distance: +distance.toFixed(1), avgSpeed: +speed.toFixed(1) };
+                await db.sessions.add(res);
+                showLastResult(res);
+                refreshArchive();
+            }
+            ui.displayActive.classList.add('hidden');
+            ui.displayIdle.classList.remove('hidden');
+        }
+
+        function showLastResult(res) {
+            ui.lastStunt.classList.remove('hidden');
+            ui.idleMsg.classList.add('hidden');
+            ui.resSpeed.innerText = res.avgSpeed;
+            ui.resDist.innerText = res.distance;
+            ui.resTime.innerText = res.duration;
+        }
+
+        // Navigation
+        ui.navTracker.onclick = () => switchTab('tracker');
+        ui.navArchive.onclick = () => switchTab('archive');
+
+        function switchTab(tab) {
+            ui.tabTracker.classList.toggle('hidden', tab !== 'tracker');
+            ui.tabArchive.classList.toggle('hidden', tab !== 'archive');
+            ui.navTracker.classList.toggle('text-zinc-900', tab === 'tracker');
+            ui.navTracker.classList.toggle('text-zinc-400', tab !== 'tracker');
+            ui.navArchive.classList.toggle('text-zinc-900', tab === 'archive');
+            ui.navArchive.classList.toggle('text-zinc-400', tab !== 'archive');
+        }
+
+        async function refreshArchive() {
+            const sessions = await db.sessions.orderBy('date').reverse().toArray();
+            ui.archCount.innerText = `${sessions.length} записів`;
+            
+            if (sessions.length > 0) {
+                const best = sessions.reduce((a, b) => a.distance > b.distance ? a : b);
+                ui.bestBox.classList.remove('hidden');
+                ui.bestDist.innerText = best.distance;
+            }
+
+            ui.list.innerHTML = sessions.map(s => `
+                <div class="bg-zinc-200 p-4">
+                    <div class="flex justify-between text-[10px] text-zinc-500 mb-2">
+                        <span>${s.date.toLocaleDateString()} ${s.date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                    </div>
+                    <div class="grid grid-cols-3 text-center">
+                        <div><p class="text-[9px] text-zinc-400 uppercase">км/г</p><p class="text-lg">${s.avgSpeed}</p></div>
+                        <div><p class="text-[9px] text-zinc-400 uppercase">м</p><p class="text-lg">${s.distance}</p></div>
+                        <div><p class="text-[9px] text-zinc-400 uppercase">сек</p><p class="text-lg">${s.duration}</p></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // SW Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').catch(console.error);
+        }
+    </script>
+</body>
+</html>
+
