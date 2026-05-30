@@ -17,7 +17,6 @@
 </head>
 <body class="bg-zinc-100 text-zinc-900 overflow-hidden h-screen flex flex-col">
 
-    <!-- ТАБ: ТРЕКЕР -->
     <div id="tab-tracker" class="flex-1 flex flex-col p-6 gap-6">
         <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.4em] text-zinc-400">
             <span>STANTER</span>
@@ -74,7 +73,6 @@
         </div>
     </div>
 
-    <!-- ТАБ: АРХІВ -->
     <div id="tab-archive" class="hidden flex-1 flex flex-col p-6 gap-6 overflow-hidden">
         <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.4em] text-zinc-400">
             <span>STANTER</span>
@@ -87,11 +85,9 @@
         </div>
 
         <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar space-y-2">
-            <!-- записи тут -->
-        </div>
+            </div>
     </div>
 
-    <!-- НАВІГАЦІЯ -->
     <nav class="h-16 border-t border-zinc-200 flex items-center justify-around bg-zinc-50">
         <button id="nav-tracker" class="flex flex-col items-center gap-1 text-zinc-900">
             <span class="text-[10px] uppercase tracking-widest font-bold">Трекер</span>
@@ -104,20 +100,28 @@
     <script>
         // DB Setup
         const db = new Dexie("StanterDB");
-        db.version(5).stores({ sessions: '++id, date, duration, distance, avgSpeed', settings: 'key' });
+        db.version(6).stores({ sessions: '++id, date, duration, distance, avgSpeed', settings: 'key' });
 
         // State
         let calibrated = false;
         let isStunting = false;
         let recordingEnabled = false;
-        let baseVec = null;
-        let gravity = { x: 0, y: 0, z: 0 };
-        let velocity = 0;
-        let distance = 0;
-        let startTime = null;
-        let lastTimestamp = 0;
+        
+        let calibBeta = 0; // Основний кут нахилу (вперед/назад)
+        let currentBeta = 0;
         let calibSamples = [];
         let isCalibrating = false;
+
+        let startTime = null;
+        let distance = 0;
+        let stuntTimer = null;
+
+        // GPS State
+        let watchId = null;
+        let lastLat = null;
+        let lastLon = null;
+        let avgSpeedKmh = 0;
+        let speedSamples = [];
 
         // Elements
         const el = (id) => document.getElementById(id);
@@ -151,7 +155,7 @@
         async function initApp() {
             const saved = await db.settings.get('calibration');
             if (saved) {
-                baseVec = saved.val;
+                calibBeta = saved.val;
                 calibrated = true;
                 updateCalibUI();
             }
@@ -159,25 +163,20 @@
         }
         initApp();
 
-        // Calibration + Permissions
+        // Calibration
         ui.btnCalib.onclick = async () => {
             if (isCalibrating) return;
 
-            // Request permissions on first click
+            // Запит дозволу на сенсори (для iOS)
             try {
-                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceOrientationEvent !== 'undefined') {
-                    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                        await DeviceMotionEvent.requestPermission();
-                    }
-                    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                        await DeviceOrientationEvent.requestPermission();
-                    }
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    await DeviceOrientationEvent.requestPermission();
                 }
             } catch (e) { console.error(e); }
 
             isCalibrating = true;
             calibSamples = [];
-            let count = 10;
+            let count = 5; // Зменшив до 5 секунд для зручності
             ui.btnCalib.innerText = `зачекайте ${count}`;
             ui.btnCalib.disabled = true;
             
@@ -197,22 +196,20 @@
             ui.btnCalib.innerText = 'калібрувати';
 
             if (calibSamples.length === 0) {
-                alert("Помилка: Немає даних від сенсорів. Переконайся, що відкрив сайт через HTTPS і надав дозвіл.");
+                alert("Немає даних від гіроскопа. Переконайся, що дав дозвіл.");
                 return;
             }
 
-            const sum = calibSamples.reduce((a, b) => ({ x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }), {x:0, y:0, z:0});
-            const avg = { x: sum.x/calibSamples.length, y: sum.y/calibSamples.length, z: sum.z/calibSamples.length };
-            const len = Math.sqrt(avg.x**2 + avg.y**2 + avg.z**2);
-            baseVec = { x: avg.x/len, y: avg.y/len, z: avg.z/len };
+            const sum = calibSamples.reduce((a, b) => a + b, 0);
+            calibBeta = sum / calibSamples.length;
             
-            db.settings.put({ key: 'calibration', val: baseVec });
+            db.settings.put({ key: 'calibration', val: calibBeta });
             calibrated = true;
             updateCalibUI();
         }
 
         ui.btnReset.onclick = () => {
-            baseVec = null;
+            calibBeta = 0;
             calibrated = false;
             db.settings.delete('calibration');
             updateCalibUI();
@@ -223,7 +220,21 @@
             ui.btnRec.disabled = !calibrated;
             ui.btnRec.style.opacity = calibrated ? '1' : '0.3';
             ui.status.innerText = calibrated ? 'готово' : 'не калібровано';
-            ui.idleMsg.innerText = calibrated ? (recordingEnabled ? 'чекаю стант' : 'увімкни запис') : 'чекаю калібрування';
+            ui.idleMsg.innerText = calibrated ? (recordingEnabled ? 'gps працює. чекаю стант' : 'увімкни запис') : 'чекаю калібрування';
+        }
+
+        // Обчислення відстані по координатах (Формула Гаверсина)
+        function calcDist(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // радіус Землі в метрах
+            const f1 = lat1 * Math.PI/180;
+            const f2 = lat2 * Math.PI/180;
+            const df = (lat2-lat1) * Math.PI/180;
+            const dl = (lon2-lon1) * Math.PI/180;
+            const a = Math.sin(df/2) * Math.sin(df/2) +
+                      Math.cos(f1) * Math.cos(f2) *
+                      Math.sin(dl/2) * Math.sin(dl/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c; 
         }
 
         // Recording Toggle
@@ -233,68 +244,92 @@
             ui.toggleBg.classList.toggle('bg-zinc-300', !recordingEnabled);
             ui.toggleDot.classList.toggle('left-6', recordingEnabled);
             ui.toggleDot.classList.toggle('left-1', !recordingEnabled);
-            if (!recordingEnabled && isStunting) stopStunt();
+            
+            if (recordingEnabled) {
+                // Вмикаємо GPS трекінг
+                watchId = navigator.geolocation.watchPosition(
+                    (pos) => {
+                        const { latitude, longitude, speed } = pos.coords;
+                        
+                        if (isStunting) {
+                            if (lastLat !== null) {
+                                distance += calcDist(lastLat, lastLon, latitude, longitude);
+                                ui.liveDist.innerText = distance.toFixed(1);
+                            }
+                            if (speed !== null) {
+                                speedSamples.push(speed * 3.6);
+                            }
+                        }
+                        
+                        lastLat = latitude;
+                        lastLon = longitude;
+                    },
+                    (err) => console.warn(err),
+                    { enableHighAccuracy: true, maximumAge: 0 }
+                );
+            } else {
+                if (watchId) navigator.geolocation.clearWatch(watchId);
+                if (isStunting) stopStunt();
+                lastLat = null;
+                lastLon = null;
+            }
             updateCalibUI();
         };
 
-        // Motion handling
-        window.addEventListener('devicemotion', (e) => {
-            const accG = e.accelerationIncludingGravity;
-            if (!accG || accG.x === null) return;
-            
-            // Low pass gravity
-            const alpha = 0.2;
-            gravity.x = gravity.x + alpha * (accG.x - gravity.x);
-            gravity.y = gravity.y + alpha * (accG.y - gravity.y);
-            gravity.z = gravity.z + alpha * (accG.z - gravity.z);
+        // Логіка орієнтації (нахилу)
+        window.addEventListener('deviceorientation', (e) => {
+            currentBeta = e.beta || 0;
 
-            if (isCalibrating) calibSamples.push({ ...gravity });
-
-            if (calibrated && recordingEnabled && !isCalibrating) {
-                // Calculate Tilt Angle from gravity vector
-                const len = Math.sqrt(gravity.x**2 + gravity.y**2 + gravity.z**2);
-                if (len > 0) {
-                    const cur = { x: gravity.x/len, y: gravity.y/len, z: gravity.z/len };
-                    const dot = cur.x*baseVec.x + cur.y*baseVec.y + cur.z*baseVec.z;
-                    const tilt = Math.acos(Math.max(-1, Math.min(1, dot))) * (180/Math.PI);
-
-                    if (!isStunting && tilt > 20) startStunt();
-                    else if (isStunting && tilt < 8) stopStunt();
-                }
+            if (isCalibrating) {
+                calibSamples.push(currentBeta);
+                return;
             }
 
-            // Distance integration
-            if (isStunting) {
-                const acc = e.acceleration;
-                const now = performance.now();
-                const dt = (now - lastTimestamp) / 1000;
-                lastTimestamp = now;
-                if (acc && dt > 0 && dt < 0.5) {
-                    const a = acc.y || 0;
-                    velocity += a * dt;
-                    distance += Math.abs(velocity * dt);
-                    ui.liveDist.innerText = distance.toFixed(1);
-                    ui.liveTime.innerText = ((Date.now() - startTime)/1000).toFixed(1);
-                }
+            if (calibrated && recordingEnabled) {
+                let tiltDiff = Math.abs(currentBeta - calibBeta);
+                if (tiltDiff > 180) tiltDiff = 360 - tiltDiff;
+
+                // 15 градусів для початку, менше 5 для зупинки
+                if (!isStunting && tiltDiff > 15) startStunt();
+                else if (isStunting && tiltDiff < 5) stopStunt();
             }
         });
 
         function startStunt() {
             isStunting = true;
             startTime = Date.now();
-            lastTimestamp = performance.now();
-            velocity = 0;
             distance = 0;
+            speedSamples = [];
+            ui.liveDist.innerText = "0.0";
             ui.displayIdle.classList.add('hidden');
             ui.displayActive.classList.remove('hidden');
+
+            stuntTimer = setInterval(() => {
+                ui.liveTime.innerText = ((Date.now() - startTime)/1000).toFixed(1);
+            }, 100);
         }
 
         async function stopStunt() {
             isStunting = false;
+            clearInterval(stuntTimer);
+            
             const dur = (Date.now() - startTime) / 1000;
-            if (dur > 0.5) {
-                const speed = (distance / dur) * 3.6;
-                const res = { date: new Date(), duration: +dur.toFixed(1), distance: +distance.toFixed(1), avgSpeed: +speed.toFixed(1) };
+            
+            // Зберігаємо станти, що тривали більше 1 секунди
+            if (dur > 1.0) {
+                let finalSpeed = 0;
+                if (speedSamples.length > 0) {
+                    finalSpeed = speedSamples.reduce((a, b) => a + b, 0) / speedSamples.length;
+                } else if (dur > 0 && distance > 0) {
+                    finalSpeed = (distance / dur) * 3.6;
+                }
+
+                const res = { 
+                    date: new Date(), 
+                    duration: +dur.toFixed(1), 
+                    distance: +distance.toFixed(1), 
+                    avgSpeed: +finalSpeed.toFixed(1) 
+                };
                 await db.sessions.add(res);
                 showLastResult(res);
                 refreshArchive();
@@ -347,12 +382,6 @@
                 </div>
             `).join('');
         }
-
-        // SW Registration
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(console.error);
-        }
     </script>
 </body>
 </html>
-
