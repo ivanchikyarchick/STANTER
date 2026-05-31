@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STANTER</title>
+    <title>STANTER - Stunt Tracker</title>
     <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -19,6 +19,13 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .recording-pulse { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+        /* Стиль для самоката в плейбеку */
+        #scooter-icon { transition: transform 0.1s linear; transform-origin: bottom center; position: relative; z-index: 10; }
+        .env-object { position: absolute; bottom: 0; animation: move-bg linear infinite; }
+        @keyframes move-bg {
+            from { transform: translateX(100vw); }
+            to { transform: translateX(-100px); }
+        }
     </style>
 </head>
 <body class="bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden h-screen flex flex-col transition-colors duration-300">
@@ -60,14 +67,18 @@
 
         <div id="display-active" class="hidden flex-1 flex flex-col items-center justify-center text-center gap-6">
             <div class="text-5xl font-light tracking-[0.3em] recording-pulse text-red-500">СТАНТ</div>
-            <div class="flex gap-12">
+            <div class="flex gap-8">
                 <div>
                     <p class="text-[10px] text-zinc-400 uppercase tracking-widest">час</p>
-                    <p id="live-time" class="text-5xl font-light">0.0</p>
+                    <p id="live-time" class="text-4xl font-light">0.0</p>
                 </div>
                 <div>
                     <p class="text-[10px] text-zinc-400 uppercase tracking-widest">дист</p>
-                    <p id="live-dist" class="text-5xl font-light">0.0</p>
+                    <p id="live-dist" class="text-4xl font-light">0.0</p>
+                </div>
+                <div>
+                    <p class="text-[10px] text-zinc-400 uppercase tracking-widest">кут</p>
+                    <p id="live-tilt" class="text-4xl font-light">0°</p>
                 </div>
             </div>
         </div>
@@ -98,8 +109,44 @@
             <span class="text-2xl font-light"><span id="best-dist">0</span> м</span>
         </div>
 
-        <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar space-y-2">
+        <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar space-y-3 pb-4">
             </div>
+    </div>
+
+    <div id="playback-modal" class="hidden fixed inset-0 z-50 bg-zinc-100/95 dark:bg-zinc-950/95 flex flex-col items-center justify-center p-8 backdrop-blur-md overflow-hidden">
+        <div id="playback-env" class="absolute inset-0 pointer-events-none opacity-20 dark:opacity-10 overflow-hidden">
+            <!-- Дерева та будинки будуть додані через JS -->
+        </div>
+
+        <p class="text-[10px] uppercase tracking-[0.4em] text-zinc-400 mb-10 relative z-10">Відтворення нахилу</p>
+        
+        <div class="grid grid-cols-4 gap-4 mb-12 w-full max-w-sm text-center relative z-10">
+            <div>
+                <p class="text-[8px] text-zinc-400 uppercase tracking-widest">км/г</p>
+                <p id="pb-speed" class="text-xl font-light">0.0</p>
+            </div>
+            <div>
+                <p class="text-[8px] text-zinc-400 uppercase tracking-widest">градус</p>
+                <p id="pb-tilt" class="text-xl font-light">0°</p>
+            </div>
+            <div>
+                <p class="text-[8px] text-zinc-400 uppercase tracking-widest">метри</p>
+                <p id="pb-dist" class="text-xl font-light">0.0</p>
+            </div>
+            <div>
+                <p class="text-[8px] text-zinc-400 uppercase tracking-widest">сек</p>
+                <p id="pb-time" class="text-xl font-light">0.0</p>
+            </div>
+        </div>
+
+        <div class="relative w-full max-w-xs h-40 border-b border-zinc-800 dark:border-zinc-400 flex items-end justify-center pb-2">
+            <div id="scooter-icon" class="text-7xl">🛴</div>
+        </div>
+
+        <div class="mt-16 flex gap-4 w-full max-w-xs relative z-10">
+            <button id="btn-close-modal" class="flex-1 border border-zinc-300 dark:border-zinc-700 py-4 rounded uppercase text-[10px] tracking-widest font-bold bg-white/50 dark:bg-black/50">Закрити</button>
+            <button id="btn-replay" class="flex-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 py-4 rounded uppercase text-[10px] tracking-widest font-bold">Повтор</button>
+        </div>
     </div>
 
     <nav class="h-16 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-around bg-zinc-50 dark:bg-zinc-900">
@@ -128,9 +175,12 @@
             document.querySelector('meta[name="theme-color"]').setAttribute('content', isDark ? '#18181b' : '#f4f4f5');
         });
 
-        // DB Setup
+        // DB Setup (IndexedDB)
         const db = new Dexie("StanterDB");
-        db.version(6).stores({ sessions: '++id, date, duration, distance, avgSpeed', settings: 'key' });
+        db.version(7).stores({ // Оновив версію для підтримки tiltData
+            sessions: '++id, date, duration, distance, avgSpeed', 
+            settings: 'key' 
+        });
 
         // State
         let calibrated = false;
@@ -145,6 +195,9 @@
         let startTime = null;
         let distance = 0;
         let stuntTimer = null;
+        
+        // Масив для запису нахилів під час активного станту
+        let tiltSamples = [];
 
         // GPS State
         let watchId = null;
@@ -164,6 +217,7 @@
             lastStunt: el('last-stunt-box'),
             liveTime: el('live-time'),
             liveDist: el('live-dist'),
+            liveTilt: el('live-tilt'),
             resSpeed: el('res-speed'),
             resDist: el('res-dist'),
             resTime: el('res-time'),
@@ -179,7 +233,14 @@
             tabTracker: el('tab-tracker'),
             tabArchive: el('tab-archive'),
             navTracker: el('nav-tracker'),
-            navArchive: el('nav-archive')
+            navArchive: el('nav-archive'),
+            playbackModal: el('playback-modal'),
+            scooterIcon: el('scooter-icon'),
+            pbSpeed: el('pb-speed'),
+            pbTilt: el('pb-tilt'),
+            pbDist: el('pb-dist'),
+            pbTime: el('pb-time'),
+            pbEnv: el('playback-env')
         };
 
         // Load Settings
@@ -257,7 +318,7 @@
             ui.idleMsg.innerText = calibrated ? (recordingEnabled ? 'gps працює. чекаю стант' : 'увімкни запис') : 'чекаю калібрування';
         }
 
-        // Гаверсин для дистанції
+        // GPS Distance Logic
         function calcDist(lat1, lon1, lat2, lon2) {
             const R = 6371e3;
             const f1 = lat1 * Math.PI/180;
@@ -281,35 +342,24 @@
             if (recordingEnabled) {
                 ui.gpsStatus.innerText = "ПОШУК GPS...";
                 ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-amber-500";
-                ui.gpsSignal.classList.add('hidden');
                 
                 if (!navigator.geolocation) {
                     ui.gpsStatus.innerText = "GPS НЕ ПІДТРИМУЄТЬСЯ";
-                    ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-red-500";
                     return;
                 }
 
-                // Вмикаємо GPS
                 watchId = navigator.geolocation.watchPosition(
                     (pos) => {
                         const { latitude, longitude, speed, accuracy } = pos.coords;
                         const spdKmh = speed ? (speed * 3.6).toFixed(1) : "0.0";
                         
-                        // Логіка сигналу GPS на основі точності
                         let signalText = "СИГНАЛ: СЛАБКИЙ";
                         let signalColor = "text-red-500";
-                        
-                        if (accuracy <= 10) {
-                            signalText = "СИГНАЛ: ІДЕАЛЬНИЙ";
-                            signalColor = "text-green-500";
-                        } else if (accuracy <= 25) {
-                            signalText = "СИГНАЛ: НОРМ";
-                            signalColor = "text-amber-500";
-                        }
+                        if (accuracy <= 10) { signalText = "СИГНАЛ: ІДЕАЛЬНИЙ"; signalColor = "text-green-500"; }
+                        else if (accuracy <= 25) { signalText = "СИГНАЛ: НОРМ"; signalColor = "text-amber-500"; }
 
                         ui.gpsStatus.innerText = `ШВИДКІСТЬ: ${spdKmh} КМ/Г`;
                         ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-zinc-900 dark:text-zinc-100 font-bold";
-                        
                         ui.gpsSignal.innerText = signalText;
                         ui.gpsSignal.className = `text-[8px] uppercase tracking-widest ${signalColor}`;
                         ui.gpsSignal.classList.remove('hidden');
@@ -317,7 +367,6 @@
                         if (isStunting) {
                             if (lastLat !== null) {
                                 const moved = calcDist(lastLat, lastLon, latitude, longitude);
-                                // Фільтруємо мікро-стрибки GPS і поганий сигнал
                                 if (moved > 0.2 && accuracy <= 25) {
                                     distance += moved;
                                     ui.liveDist.innerText = distance.toFixed(1);
@@ -327,25 +376,19 @@
                                 speedSamples.push(speed * 3.6);
                             }
                         }
-                        
                         lastLat = latitude;
                         lastLon = longitude;
                     },
                     (err) => {
                         ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-red-500 font-bold";
-                        ui.gpsSignal.classList.add('hidden');
-                        if (err.code === 1) ui.gpsStatus.innerText = "НЕМАЄ ДОЗВОЛУ GPS";
-                        else if (err.code === 2) ui.gpsStatus.innerText = "СИГНАЛ ВТРАЧЕНО";
-                        else if (err.code === 3) ui.gpsStatus.innerText = "ТАЙМАУТ GPS";
-                        else ui.gpsStatus.innerText = "ПОМИЛКА GPS";
+                        ui.gpsStatus.innerText = "ПОМИЛКА GPS";
                     },
                     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
                 );
             } else {
                 if (watchId) navigator.geolocation.clearWatch(watchId);
                 if (isStunting) stopStunt();
-                lastLat = null;
-                lastLon = null;
+                lastLat = null; lastLon = null;
                 ui.gpsStatus.innerText = "GPS ВИМК";
                 ui.gpsStatus.className = "text-[9px] uppercase tracking-widest text-zinc-400";
                 ui.gpsSignal.classList.add('hidden');
@@ -353,7 +396,7 @@
             updateCalibUI();
         };
 
-        // Логіка орієнтації
+        // Orientation Event Listener
         window.addEventListener('deviceorientation', (e) => {
             currentBeta = e.beta || 0;
 
@@ -363,11 +406,20 @@
             }
 
             if (calibrated && recordingEnabled) {
-                let tiltDiff = Math.abs(currentBeta - calibBeta);
-                if (tiltDiff > 180) tiltDiff = 360 - tiltDiff;
+                let rawTilt = currentBeta - calibBeta;
+                if (rawTilt > 180) rawTilt -= 360;
+                if (rawTilt < -180) rawTilt += 360;
+                
+                let tiltMag = Math.abs(rawTilt);
 
-                if (!isStunting && tiltDiff > 15) startStunt();
-                else if (isStunting && tiltDiff < 5) stopStunt();
+                if (!isStunting && tiltMag > 15) startStunt();
+                else if (isStunting && tiltMag < 5) stopStunt();
+
+                // Оновлюємо кут на екрані, якщо стант активний
+                if (isStunting) {
+                    ui.liveTilt.innerText = `${Math.round(rawTilt)}°`;
+                    tiltSamples.push(rawTilt);
+                }
             }
         });
 
@@ -376,6 +428,7 @@
             startTime = Date.now();
             distance = 0;
             speedSamples = [];
+            tiltSamples = []; // Очищуємо масив нахилів
             ui.liveDist.innerText = "0.0";
             ui.displayIdle.classList.add('hidden');
             ui.displayActive.classList.remove('hidden');
@@ -390,7 +443,6 @@
             clearInterval(stuntTimer);
             
             const dur = (Date.now() - startTime) / 1000;
-            
             if (dur > 1.0) {
                 let finalSpeed = 0;
                 if (speedSamples.length > 0) {
@@ -403,7 +455,8 @@
                     date: new Date(), 
                     duration: +dur.toFixed(1), 
                     distance: +distance.toFixed(1), 
-                    avgSpeed: +finalSpeed.toFixed(1) 
+                    avgSpeed: +finalSpeed.toFixed(1),
+                    tiltData: tiltSamples // Зберігаємо графік нахилів
                 };
                 await db.sessions.add(res);
                 showLastResult(res);
@@ -428,7 +481,6 @@
         function switchTab(tab) {
             ui.tabTracker.classList.toggle('hidden', tab !== 'tracker');
             ui.tabArchive.classList.toggle('hidden', tab !== 'archive');
-            
             ui.navTracker.className = `flex flex-col items-center gap-1 ${tab === 'tracker' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}`;
             ui.navArchive.className = `flex flex-col items-center gap-1 ${tab === 'archive' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}`;
         }
@@ -448,14 +500,102 @@
                     <div class="flex justify-between text-[10px] text-zinc-500 mb-2">
                         <span>${s.date.toLocaleDateString()} ${s.date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                     </div>
-                    <div class="grid grid-cols-3 text-center">
+                    <div class="grid grid-cols-3 text-center mb-3">
                         <div><p class="text-[9px] text-zinc-400 uppercase">км/г</p><p class="text-lg">${s.avgSpeed}</p></div>
                         <div><p class="text-[9px] text-zinc-400 uppercase">м</p><p class="text-lg">${s.distance}</p></div>
                         <div><p class="text-[9px] text-zinc-400 uppercase">сек</p><p class="text-lg">${s.duration}</p></div>
                     </div>
+                    <button onclick="playSession(${s.id})" class="w-full bg-zinc-300 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 py-2 rounded text-[10px] uppercase tracking-widest font-bold">Відтворити нахил</button>
                 </div>
             `).join('');
         }
+
+        // ЛОГІКА PLAYBACK (ВІДТВОРЕННЯ)
+        let activePlayback = null;
+        let playbackData = [];
+        let currentSession = null;
+
+        window.playSession = async function(id) {
+            const session = await db.sessions.get(id);
+            if (!session || !session.tiltData || session.tiltData.length === 0) {
+                alert("Дані про нахил відсутні для цього запису.");
+                return;
+            }
+            playbackData = session.tiltData;
+            currentSession = session;
+            ui.playbackModal.classList.remove('hidden');
+            startPlayback();
+        }
+
+        function spawnEnvObject() {
+            const objects = ['🌳', '🏠', '🏢', '🌲', '🏘️', '🏫'];
+            const obj = document.createElement('div');
+            obj.className = 'env-object text-4xl';
+            obj.innerText = objects[Math.floor(Math.random() * objects.length)];
+            
+            // Випадкова швидкість анімації залежно від середньої швидкості станту
+            const baseSpeed = currentSession ? (40 / (currentSession.avgSpeed + 5)) : 2;
+            const duration = (Math.random() * 2 + baseSpeed).toFixed(1);
+            obj.style.animationDuration = `${duration}s`;
+            
+            ui.pbEnv.appendChild(obj);
+            setTimeout(() => obj.remove(), parseFloat(duration) * 1000);
+        }
+
+        let envSpawner = null;
+
+        function startPlayback() {
+            clearInterval(activePlayback);
+            clearInterval(envSpawner);
+            ui.pbEnv.innerHTML = '';
+            
+            ui.pbSpeed.innerText = currentSession.avgSpeed;
+            ui.pbDist.innerText = '0.0';
+            ui.pbTime.innerText = '0.0';
+            
+            let i = 0;
+            const durationMs = currentSession.duration * 1000;
+            const playbackInterval = durationMs / playbackData.length;
+            
+            const stepDist = currentSession.distance / playbackData.length;
+
+            // Спавн об'єктів фону
+            envSpawner = setInterval(() => {
+                if (currentSession.avgSpeed > 2) spawnEnvObject();
+            }, 500);
+
+            activePlayback = setInterval(() => {
+                if (i >= playbackData.length) {
+                    clearInterval(activePlayback);
+                    clearInterval(envSpawner);
+                    // Фіксуємо фінальні значення
+                    ui.pbDist.innerText = currentSession.distance.toFixed(1);
+                    ui.pbTime.innerText = currentSession.duration.toFixed(1);
+                    return;
+                }
+                
+                const tilt = playbackData[i];
+                // Використовуємо інверсію для правильної візуалізації (від’ємний кут піднімає перед)
+                ui.scooterIcon.style.transform = `rotate(${-tilt}deg)`;
+                ui.pbTilt.innerText = `${Math.round(tilt)}°`;
+                
+                ui.pbDist.innerText = (stepDist * i).toFixed(1);
+                ui.pbTime.innerText = ((currentSession.duration / playbackData.length) * i).toFixed(1);
+
+                i++;
+            }, playbackInterval);
+        }
+
+        el('btn-close-modal').onclick = () => {
+            clearInterval(activePlayback);
+            clearInterval(envSpawner);
+            ui.playbackModal.classList.add('hidden');
+            ui.scooterIcon.style.transform = 'rotate(0deg)';
+            ui.pbEnv.innerHTML = '';
+        }
+
+        el('btn-replay').onclick = startPlayback;
+
     </script>
 </body>
 </html>
