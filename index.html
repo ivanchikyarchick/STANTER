@@ -625,7 +625,7 @@
         let envSpawner = null;
 
         function startPlayback() {
-            clearInterval(activePlayback);
+            cancelAnimationFrame(activePlayback);
             clearInterval(envSpawner);
             ui.pbEnv.innerHTML = '';
             
@@ -635,44 +635,43 @@
             
             startPBAudio();
 
-            let i = 0;
             const durationMs = currentSession.duration * 1000;
-            const playbackInterval = durationMs / playbackData.length;
-            
-            const stepDist = currentSession.distance / playbackData.length;
+            const len = playbackData.length;
+            const playStart = performance.now();
 
             // Спавн об'єктів фону
             envSpawner = setInterval(() => {
                 if (currentSession.avgSpeed > 2) spawnEnvObject();
             }, 500);
 
-            activePlayback = setInterval(() => {
-                if (i >= playbackData.length) {
-                    clearInterval(activePlayback);
+            // Прив'язка до реального часу (rAF) — швидкість завжди точна
+            function frame(now) {
+                const elapsed = now - playStart;
+                const progress = Math.min(1, elapsed / durationMs);
+                const i = Math.min(len - 1, Math.floor(progress * len));
+
+                const tilt = playbackData[i];
+                ui.scooterIcon.style.transform = `rotate(${tilt}deg)`;
+                ui.pbTilt.innerText = `${Math.round(tilt)}°`;
+                updatePBAudio(tilt);
+
+                ui.pbDist.innerText = (currentSession.distance * progress).toFixed(1);
+                ui.pbTime.innerText = (currentSession.duration * progress).toFixed(1);
+
+                if (progress >= 1) {
                     clearInterval(envSpawner);
                     stopPBAudio();
-                    // Фіксуємо фінальні значення
                     ui.pbDist.innerText = currentSession.distance.toFixed(1);
                     ui.pbTime.innerText = currentSession.duration.toFixed(1);
                     return;
                 }
-                
-                const tilt = playbackData[i];
-                // Повертаємо пряме значення кута (позитивний кут піднімає перед)
-                ui.scooterIcon.style.transform = `rotate(${tilt}deg)`;
-                ui.pbTilt.innerText = `${Math.round(tilt)}°`;
-                
-                updatePBAudio(tilt);
-                
-                ui.pbDist.innerText = (stepDist * i).toFixed(1);
-                ui.pbTime.innerText = ((currentSession.duration / playbackData.length) * i).toFixed(1);
-
-                i++;
-            }, playbackInterval);
+                activePlayback = requestAnimationFrame(frame);
+            }
+            activePlayback = requestAnimationFrame(frame);
         }
 
         el('btn-close-modal').onclick = () => {
-            clearInterval(activePlayback);
+            cancelAnimationFrame(activePlayback);
             clearInterval(envSpawner);
             stopPBAudio();
             ui.playbackModal.classList.add('hidden');
