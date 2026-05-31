@@ -234,9 +234,50 @@
 
         const sounds = {
             start: () => { playBeep(880, 0.1); },
-            stop: () => { playBeep(440, 0.1); setTimeout(() => playBeep(330, 0.1), 100); },
-            whoosh: (freq) => { playBeep(freq, 0.05, 'triangle'); }
+            stop: () => { playBeep(440, 0.1); setTimeout(() => playBeep(330, 0.1), 100); }
         };
+
+        let pbOsc = null;
+        let pbGain = null;
+
+        function startPBAudio() {
+            if (pbOsc) return;
+            pbOsc = audioCtx.createOscillator();
+            pbGain = audioCtx.createGain();
+            pbOsc.type = 'triangle'; // М'якший звук ніж sine, але не такий різкий як square
+            pbOsc.frequency.setValueAtTime(200, audioCtx.currentTime);
+            pbGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            pbOsc.connect(pbGain);
+            pbGain.connect(audioCtx.destination);
+            pbOsc.start();
+        }
+
+        function updatePBAudio(tilt) {
+            if (!pbOsc || !pbGain) return;
+            const targetFreq = 150 + Math.abs(tilt) * 6;
+            const targetVol = Math.max(0, Math.min(0.1, (Math.abs(tilt) - 5) / 150));
+            
+            // setTargetAtTime дає дуже плавний перехід без клацання
+            pbOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.03);
+            pbGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.03);
+        }
+
+        function stopPBAudio() {
+            if (pbOsc) {
+                const currentGain = pbGain.gain.value;
+                pbGain.gain.cancelScheduledValues(audioCtx.currentTime);
+                pbGain.gain.setValueAtTime(currentGain, audioCtx.currentTime);
+                pbGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.1);
+                setTimeout(() => {
+                    if (pbOsc) {
+                        pbOsc.stop();
+                        pbOsc.disconnect();
+                        pbOsc = null;
+                        pbGain = null;
+                    }
+                }, 100);
+            }
+        }
 
         let startTime = null;
         let distance = 0;
@@ -629,6 +670,8 @@
             ui.pbDist.innerText = '0.0';
             ui.pbTime.innerText = '0.0';
             
+            startPBAudio();
+
             let i = 0;
             const durationMs = currentSession.duration * 1000;
             const playbackInterval = durationMs / playbackData.length;
@@ -644,6 +687,7 @@
                 if (i >= playbackData.length) {
                     clearInterval(activePlayback);
                     clearInterval(envSpawner);
+                    stopPBAudio();
                     // Фіксуємо фінальні значення
                     ui.pbDist.innerText = currentSession.distance.toFixed(1);
                     ui.pbTime.innerText = currentSession.duration.toFixed(1);
@@ -655,10 +699,7 @@
                 ui.scooterIcon.style.transform = `rotate(${tilt}deg)`;
                 ui.pbTilt.innerText = `${Math.round(tilt)}°`;
                 
-                // Звуковий супровід нахилу
-                if (Math.abs(tilt) > 5) {
-                    sounds.whoosh(200 + Math.abs(tilt) * 5);
-                }
+                updatePBAudio(tilt);
                 
                 ui.pbDist.innerText = (stepDist * i).toFixed(1);
                 ui.pbTime.innerText = ((currentSession.duration / playbackData.length) * i).toFixed(1);
@@ -670,6 +711,7 @@
         el('btn-close-modal').onclick = () => {
             clearInterval(activePlayback);
             clearInterval(envSpawner);
+            stopPBAudio();
             ui.playbackModal.classList.add('hidden');
             ui.scooterIcon.style.transform = 'rotate(0deg)';
             ui.pbEnv.innerHTML = '';
