@@ -129,6 +129,8 @@
             </div>
     </div>
 
+    <audio id="motor-audio" src="motor.m4a" loop preload="auto"></audio>
+
     <div id="playback-modal" class="hidden fixed inset-0 z-50 bg-zinc-100/95 dark:bg-zinc-950/95 flex flex-col items-center justify-center p-8 backdrop-blur-md overflow-hidden">
         <div id="playback-env" class="absolute inset-0 pointer-events-none opacity-20 dark:opacity-10 overflow-hidden">
             <!-- Дерева та будинки будуть додані через JS -->
@@ -237,46 +239,54 @@
             stop: () => { playBeep(440, 0.1); setTimeout(() => playBeep(330, 0.1), 100); }
         };
 
-        let pbOsc = null;
-        let pbGain = null;
+        // === РЕАЛЬНИЙ ЗВУК МОТОРА (Kukirin G2, запис на 50 км/г) ===
+        const motorAudio = document.getElementById('motor-audio');
+        let motorActive = false;
+        let targetRate = 0.5;
+        let targetVol = 0;
+        let audioRamp = null;
 
         function startPBAudio() {
-            if (pbOsc) return;
-            pbOsc = audioCtx.createOscillator();
-            pbGain = audioCtx.createGain();
-            pbOsc.type = 'sine'; // Sine звучить набагато м'якше та менш схоже на мотор
-            pbOsc.frequency.setValueAtTime(110, audioCtx.currentTime);
-            pbGain.gain.setValueAtTime(0, audioCtx.currentTime);
-            pbOsc.connect(pbGain);
-            pbGain.connect(audioCtx.destination);
-            pbOsc.start();
+            motorActive = true;
+            motorAudio.currentTime = 0;
+            motorAudio.volume = 0;
+            motorAudio.playbackRate = 0.5;
+            targetRate = 0.5;
+            targetVol = 0;
+            const p = motorAudio.play();
+            if (p) p.catch(() => {});
+
+            // Плавне згладжування швидкості та гучності (без різких стрибків)
+            clearInterval(audioRamp);
+            audioRamp = setInterval(() => {
+                if (!motorActive) return;
+                // Малий коефіцієнт = дуже плавний перехід тону
+                motorAudio.playbackRate += (targetRate - motorAudio.playbackRate) * 0.05;
+                motorAudio.volume += (targetVol - motorAudio.volume) * 0.08;
+            }, 16);
         }
 
         function updatePBAudio(tilt) {
-            if (!pbOsc || !pbGain) return;
-            const targetFreq = 110 + Math.abs(tilt) * 5;
-            const targetVol = Math.max(0, Math.min(0.08, (Math.abs(tilt) - 3) / 120));
-            
-            // setTargetAtTime дає дуже плавний перехід без клацання
-            pbOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
-            pbGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.05);
+            if (!motorActive) return;
+            const k = Math.min(1, Math.abs(tilt) / 90); // 0 = спокій, 1 = макс розгін
+
+            // Ширший діапазон тону для помітної, але плавної зміни
+            // На спокої 0.4 (низький тон), на макс 1.1 (високий розгін)
+            targetRate = 0.4 + k * 0.7;
+            targetVol = Math.min(1, 0.2 + k * 0.8);
         }
 
         function stopPBAudio() {
-            if (pbOsc) {
-                const currentGain = pbGain.gain.value;
-                pbGain.gain.cancelScheduledValues(audioCtx.currentTime);
-                pbGain.gain.setValueAtTime(currentGain, audioCtx.currentTime);
-                pbGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.1);
-                setTimeout(() => {
-                    if (pbOsc) {
-                        pbOsc.stop();
-                        pbOsc.disconnect();
-                        pbOsc = null;
-                        pbGain = null;
-                    }
-                }, 100);
-            }
+            motorActive = false;
+            clearInterval(audioRamp);
+            // Плавне затихання
+            const fade = setInterval(() => {
+                motorAudio.volume = Math.max(0, motorAudio.volume - 0.1);
+                if (motorAudio.volume <= 0.01) {
+                    clearInterval(fade);
+                    motorAudio.pause();
+                }
+            }, 30);
         }
 
         let startTime = null;
