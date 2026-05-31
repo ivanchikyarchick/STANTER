@@ -188,9 +188,15 @@
         let recordingEnabled = false;
         
         let calibBeta = 0;
+        let calibGamma = 0;
         let currentBeta = 0;
+        let currentGamma = 0;
         let calibSamples = [];
         let isCalibrating = false;
+
+        let lastStableTilt = 0;
+        const LPF_FACTOR = 0.3; // Трохи збільшив для швидшої реакції
+        const JUMP_THRESHOLD = 70; // Збільшив поріг, щоб не відсікати різкі підриви керма
 
         let startTime = null;
         let distance = 0;
@@ -247,7 +253,13 @@
         async function initApp() {
             const saved = await db.settings.get('calibration');
             if (saved) {
-                calibBeta = saved.val;
+                if (typeof saved.val === 'object') {
+                    calibBeta = saved.val.beta;
+                    calibGamma = saved.val.gamma;
+                } else {
+                    calibBeta = saved.val;
+                    calibGamma = 0;
+                }
                 calibrated = true;
                 updateCalibUI();
             }
@@ -295,10 +307,12 @@
                 return;
             }
 
-            const sum = calibSamples.reduce((a, b) => a + b, 0);
-            calibBeta = sum / calibSamples.length;
+            const sumBeta = calibSamples.reduce((a, b) => a + b.beta, 0);
+            const sumGamma = calibSamples.reduce((a, b) => a + b.gamma, 0);
+            calibBeta = sumBeta / calibSamples.length;
+            calibGamma = sumGamma / calibSamples.length;
             
-            db.settings.put({ key: 'calibration', val: calibBeta });
+            db.settings.put({ key: 'calibration', val: { beta: calibBeta, gamma: calibGamma } });
             calibrated = true;
             updateCalibUI();
         }
@@ -399,26 +413,46 @@
         // Orientation Event Listener
         window.addEventListener('deviceorientation', (e) => {
             currentBeta = e.beta || 0;
+            currentGamma = e.gamma || 0;
 
             if (isCalibrating) {
-                calibSamples.push(currentBeta);
+                calibSamples.push({ beta: currentBeta, gamma: currentGamma });
                 return;
             }
 
             if (calibrated && recordingEnabled) {
-                let rawTilt = currentBeta - calibBeta;
+                // Стабільна формула Pitch (нахил вперед-назад)
+                const getPitch = (b, g) => {
+                    const radB = b * Math.PI / 180;
+                    const radG = g * Math.PI / 180;
+                    return Math.atan2(Math.sin(radB), Math.cos(radB) * Math.cos(radG)) * 180 / Math.PI;
+                };
+
+                let currentPitch = getPitch(currentBeta, currentGamma);
+                let calibPitch = getPitch(calibBeta, calibGamma);
+
+                let rawTilt = currentPitch - calibPitch;
                 if (rawTilt > 180) rawTilt -= 360;
                 if (rawTilt < -180) rawTilt += 360;
                 
-                let tiltMag = Math.abs(rawTilt);
+                // Фільтр стрибків (ігноруємо нереальні значення від різких рухів)
+                if (Math.abs(rawTilt - lastStableTilt) > JUMP_THRESHOLD) {
+                    // Якщо стрибок занадто різкий, використовуємо попереднє значення
+                    rawTilt = lastStableTilt;
+                }
+
+                // Low Pass Filter для плавності
+                lastStableTilt = (rawTilt * LPF_FACTOR) + (lastStableTilt * (1 - LPF_FACTOR));
+                
+                let tiltMag = Math.abs(lastStableTilt);
 
                 if (!isStunting && tiltMag > 15) startStunt();
                 else if (isStunting && tiltMag < 5) stopStunt();
 
                 // Оновлюємо кут на екрані, якщо стант активний
                 if (isStunting) {
-                    ui.liveTilt.innerText = `${Math.round(rawTilt)}°`;
-                    tiltSamples.push(rawTilt);
+                    ui.liveTilt.innerText = `${Math.round(lastStableTilt)}°`;
+                    tiltSamples.push(lastStableTilt);
                 }
             }
         });
@@ -575,8 +609,8 @@
                 }
                 
                 const tilt = playbackData[i];
-                // Використовуємо інверсію для правильної візуалізації (від’ємний кут піднімає перед)
-                ui.scooterIcon.style.transform = `rotate(${-tilt}deg)`;
+                // Повертаємо пряме значення кута (позитивний кут піднімає перед)
+                ui.scooterIcon.style.transform = `rotate(${tilt}deg)`;
                 ui.pbTilt.innerText = `${Math.round(tilt)}°`;
                 
                 ui.pbDist.innerText = (stepDist * i).toFixed(1);
