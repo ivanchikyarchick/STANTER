@@ -20,13 +20,13 @@
         .recording-pulse { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
         /* Стиль для самоката в плейбеку */
-        #scooter-icon { transition: transform 0.1s linear; transform-origin: bottom center; position: relative; z-index: 10; }
+        #scooter-icon { transition: transform 0.02s linear; transform-origin: bottom center; position: relative; z-index: 10; }
         .env-object { position: absolute; bottom: 0; animation: move-bg linear infinite; }
         @keyframes move-bg {
             from { transform: translateX(100vw); }
             to { transform: translateX(-100px); }
         }
-        
+
         nav {
             padding-bottom: env(safe-area-inset-bottom);
             height: calc(4.5rem + env(safe-area-inset-bottom)) !important;
@@ -211,8 +211,32 @@
         let isCalibrating = false;
 
         let lastStableTilt = 0;
-        const LPF_FACTOR = 0.3; // Трохи збільшив для швидшої реакції
+        const LPF_FACTOR = 0.15; // Ще плавніше (було 0.3)
         const JUMP_THRESHOLD = 70; // Збільшив поріг, щоб не відсікати різкі підриви керма
+
+        // Audio System
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playBeep(freq, dur, type = 'sine') {
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + dur);
+            } catch(e) {}
+        }
+
+        const sounds = {
+            start: () => { playBeep(880, 0.1); },
+            stop: () => { playBeep(440, 0.1); setTimeout(() => playBeep(330, 0.1), 100); },
+            whoosh: (freq) => { playBeep(freq, 0.05, 'triangle'); }
+        };
 
         let startTime = null;
         let distance = 0;
@@ -475,6 +499,7 @@
 
         function startStunt() {
             isStunting = true;
+            sounds.start();
             startTime = Date.now();
             distance = 0;
             speedSamples = [];
@@ -490,6 +515,7 @@
 
         async function stopStunt() {
             isStunting = false;
+            sounds.stop();
             clearInterval(stuntTimer);
             
             const dur = (Date.now() - startTime) / 1000;
@@ -628,6 +654,11 @@
                 // Повертаємо пряме значення кута (позитивний кут піднімає перед)
                 ui.scooterIcon.style.transform = `rotate(${tilt}deg)`;
                 ui.pbTilt.innerText = `${Math.round(tilt)}°`;
+                
+                // Звуковий супровід нахилу
+                if (Math.abs(tilt) > 5) {
+                    sounds.whoosh(200 + Math.abs(tilt) * 5);
+                }
                 
                 ui.pbDist.innerText = (stepDist * i).toFixed(1);
                 ui.pbTime.innerText = ((currentSession.duration / playbackData.length) * i).toFixed(1);
