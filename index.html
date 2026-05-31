@@ -2,7 +2,7 @@
 <html lang="uk" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>STANTER - Stunt Tracker</title>
     <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,7 +15,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;700&display=swap" rel="stylesheet">
     <meta name="theme-color" content="#18181b">
     <style>
-        body { font-family: 'Roboto Mono', monospace; user-select: none; touch-action: manipulation; }
+        body { font-family: 'Roboto Mono', monospace; user-select: none; touch-action: manipulation; padding-top: env(safe-area-inset-top); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .recording-pulse { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
@@ -26,9 +26,25 @@
             from { transform: translateX(100vw); }
             to { transform: translateX(-100px); }
         }
+        
+        nav {
+            padding-bottom: env(safe-area-inset-bottom);
+            height: calc(4.5rem + env(safe-area-inset-bottom)) !important;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+        }
+        
+        nav button {
+            height: 4rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
     </style>
 </head>
-<body class="bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden h-screen flex flex-col transition-colors duration-300">
+<body class="bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden h-[100dvh] flex flex-col transition-colors duration-300">
 
     <div id="tab-tracker" class="flex-1 flex flex-col p-6 gap-6">
         <div class="flex justify-between items-center">
