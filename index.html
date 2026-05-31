@@ -244,8 +244,8 @@
             if (pbOsc) return;
             pbOsc = audioCtx.createOscillator();
             pbGain = audioCtx.createGain();
-            pbOsc.type = 'triangle'; // М'якший звук ніж sine, але не такий різкий як square
-            pbOsc.frequency.setValueAtTime(200, audioCtx.currentTime);
+            pbOsc.type = 'sine'; // Sine звучить набагато м'якше та менш схоже на мотор
+            pbOsc.frequency.setValueAtTime(110, audioCtx.currentTime);
             pbGain.gain.setValueAtTime(0, audioCtx.currentTime);
             pbOsc.connect(pbGain);
             pbGain.connect(audioCtx.destination);
@@ -254,12 +254,12 @@
 
         function updatePBAudio(tilt) {
             if (!pbOsc || !pbGain) return;
-            const targetFreq = 150 + Math.abs(tilt) * 6;
-            const targetVol = Math.max(0, Math.min(0.1, (Math.abs(tilt) - 5) / 150));
+            const targetFreq = 110 + Math.abs(tilt) * 5;
+            const targetVol = Math.max(0, Math.min(0.08, (Math.abs(tilt) - 3) / 120));
             
             // setTargetAtTime дає дуже плавний перехід без клацання
-            pbOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.03);
-            pbGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.03);
+            pbOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
+            pbGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.05);
         }
 
         function stopPBAudio() {
